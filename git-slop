@@ -1,0 +1,105 @@
+#!/bin/bash
+
+warn () {
+  echo "$@" 1>&2
+}
+
+require_clean_work_tree () {
+  # references:
+  # http://git.661346.n2.nabble.com/Best-way-to-check-for-a-quot-dirty-quot-working-tree-td6465415.html
+
+  # Update the index stat data
+  git update-index -q --ignore-submodules --refresh
+  local err=0
+
+  # Disallow unstaged changes in the working tree
+  if ! git diff-files --quiet --ignore-submodules --
+  then
+    warn "cannot $1: you have unstaged changes."
+    git diff-files --name-status -r --ignore-submodules -- >&2
+    (( err++ ))
+  fi
+
+  # Disallow uncommitted changes in the index
+  if ! git diff-index --cached --quiet HEAD --ignore-submodules --
+  then
+    warn "cannot $1: your index contains uncommitted changes."
+    git diff-index --cached --name-status -r --ignore-submodules HEAD -- >&2
+    (( err++ ))
+  fi
+
+  if (( err > 0 ))
+  then
+    warn "Please commit or stash them."
+    exit 1
+  fi
+}
+
+require_cwd_in_work_tree () {
+  if ! git rev-parse 2>/dev/null
+  then
+    warn "$PWD is not under git revision control"
+    exit 1
+  fi
+}
+
+git_at_commit () {
+  val="@$(git rev-list HEAD --max-count=1 --abbrev-commit 2> /dev/null)"
+  if [ $? -eq 0 ]
+  then
+    echo -n "$val"
+    return 0
+  else
+    echo -n ""
+    return 1
+  fi  
+} 
+
+usage () {
+  echo "help not implemented... exiting"
+  exit 1
+}
+
+git_path () {
+  local fptr fpta
+  if git rev-parse --git-dir &> /dev/null; then
+    fptr="$(git rev-parse --git-dir)"
+    if [[ $fptr == '.git' ]]; then
+      fpta=$(readlink -f $PWD)
+    else
+      fpta="${fptr%'/.git'}"
+    fi
+    echo $fpta
+    return 0
+  else
+    echo ""
+    return 1
+  fi
+}
+
+while getopts ":h" opt; do
+  case "$opt" in
+    *) usage;;
+  esac
+done
+shift $((OPTIND - 1))
+
+project=$(basename $(dirname $(git_path)))
+module="$(basename $(git_path))"
+name="${TMPDIR:-/tmp}/$project-${module}$(git_at_commit)-safe.tgz"
+if [[ -e "$name". ]]; then
+  warn "destfile $name exists"
+  exit 1
+fi
+
+# other sanity checks
+require_cwd_in_work_tree
+require_clean_work_tree
+
+cd "$(git_path)"
+if ! git archive --prefix="$module/" --format=tar "${1:-HEAD}" | gzip > "$name"
+then
+  warn "failed to make archive!"
+  exit 1
+fi
+echo "archived as $name"
