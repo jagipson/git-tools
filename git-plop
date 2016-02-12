@@ -1,0 +1,124 @@
+#!/bin/bash
+
+warn () {
+  echo "$@" 1>&2
+}
+
+require_clean_work_tree () {
+  # references:
+  # http://git.661346.n2.nabble.com/Best-way-to-check-for-a-quot-dirty-quot-working-tree-td6465415.html
+
+  # Update the index stat data
+  git update-index -q --ignore-submodules --refresh
+  local err=0
+
+  # Disallow unstaged changes in the working tree
+  if ! git diff-files --quiet --ignore-submodules --
+  then
+    warn "cannot $1: you have unstaged changes."
+    git diff-files --name-status -r --ignore-submodules -- >&2
+    (( err++ ))
+  fi
+
+  # Disallow uncommitted changes in the index
+  if ! git diff-index --cached --quiet HEAD --ignore-submodules --
+  then
+    warn "cannot $1: your index contains uncommitted changes."
+    git diff-index --cached --name-status -r --ignore-submodules HEAD -- >&2
+    (( err++ ))
+  fi
+
+  if (( err > 0 ))
+  then
+    warn "Please commit or stash them."
+    exit 1
+  fi
+}
+
+require_cwd_in_work_tree () {
+  if ! git rev-parse 2>/dev/null
+  then
+    warn "$PWD is not under git revision control"
+    exit 1
+  fi
+}
+
+git_at_commit () {
+  val="@$(git rev-list HEAD --max-count=1 --abbrev-commit 2> /dev/null)"
+  if [ $? -eq 0 ]
+  then
+    echo -n "$val"
+    return 0
+  else
+    echo -n ""
+    return 1
+  fi  
+} 
+
+git_path () {
+  local fptr fpta
+  if git rev-parse --git-dir &> /dev/null; then
+    fptr="$(git rev-parse --git-dir)"
+    if [[ $fptr == '.git' ]]; then
+      fpta=$(readlink -f $PWD)
+    else
+      fpta="${fptr%'/.git'}"
+    fi
+    echo $fpta
+    return 0
+  else
+    echo ""
+    return 1
+  fi
+}
+
+while getopts ":h" opt; do
+  case "$opt" in
+    *) usage;;
+  esac
+done
+shift $((OPTIND - 1))
+
+archives=()
+# read the remaining items listed and verify they exist
+for name; do
+  if [[ -e "$name" ]]
+  then
+    archives+=("$name")
+  else
+    warn "file $name doesn't exist"
+    (( err++ ))
+  fi
+done
+if (( err > 0 ))
+then
+  exit 1
+fi
+
+# other sanity checks
+require_cwd_in_work_tree
+require_clean_work_tree
+
+# go to top level and start working
+if ! cd $(git_path)
+then
+  warn "unable to get to project root"
+  exit 1
+fi
+
+backupfile=$(mktemp --tmpdir git-plop.undo.XXXXX.tgz)
+if ! tar -zcf "$backupfile" ..
+then
+  warn "unable to create backup first"
+  exit 1
+fi
+echo "Backed up to $backup"
+
+for ((count=0; count<${#archives[@]}; count++))
+do
+  echo "*** untarring ${archives[$count]}"
+  if ! tar -zvxf "${archives[$count]}" --exclude='.git*' --strip-components=1
+  then
+    warn "ERRORS OCCURED on ${archives[$count]}"
+  fi
+done
