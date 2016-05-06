@@ -1,0 +1,97 @@
+#!/bin/bash
+
+version_file=".version"
+
+warn () {
+  echo "$@" 1>&2
+}
+
+require_cwd_in_work_tree () {
+  if ! git rev-parse 2>/dev/null
+  then
+    warn "$PWD is not under git revision control"
+    exit 1
+  fi
+}
+
+usage () {
+  echo "git version (show|bump (major|minor|rev)|generate)"
+  exit 1
+}
+
+git_path () {
+  local fptr fpta
+  if git rev-parse --git-dir &> /dev/null; then
+    fptr="$(git rev-parse --git-dir)"
+    if [[ $fptr == '.git' ]]; then
+      fpta=$(readlink -f $PWD)
+    else
+      fpta="${fptr%'/.git'}"
+    fi
+    echo $fpta
+    return 0
+  else
+    echo ""
+    return 1
+  fi
+  echo "major=$1" > "$version_file"
+  echo "minor=$2" >> "$version_file"
+  echo "rev=$3" >> "$version_file"
+}
+while getopts ":h" opt; do
+  case "$opt" in
+    *) usage;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# other sanity checks
+require_cwd_in_work_tree
+
+cd "$(git_path)"
+
+if [[ -z $1 ]]; then
+  usage
+elif [[ $1 == generate ]]; then
+  write_vfile 0 0 0
+  echo "$version_file" >> .gitignore
+else 
+  if ! [[ -f "$version_file" ]]; then
+    warn "Version file $version_file missing!"
+    exit 1
+  fi
+  source "$version_file"
+  if [[ $1 == show ]]; then
+    fmt="%d.%d.%d"
+    if [[ -t 1 ]]; then
+      fmt="$fmt\n"
+    fi
+    printf "$fmt" "$major" "$minor" "$rev"
+  elif [[ $1 == bump ]]; then
+    printf "%s.%s.%s -> " "$major" "$minor" "$rev"
+    case $2 in
+      major)
+        (( major++ ))
+        minor=0
+        rev=0
+        ;;
+
+      minor)
+        (( minor++ ))
+        rev=0
+        ;;
+
+      rev)
+        (( rev++ ))
+        ;;
+
+      *)
+        usage
+        ;;
+    esac
+    write_vfile "$major" "$minor" "$rev"
+    printf "%s.%s.%s\n" "$major" "$minor" "$rev"
+  else
+    usage
+  fi
+fi
