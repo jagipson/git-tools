@@ -15,7 +15,13 @@ require_cwd_in_work_tree () {
 }
 
 usage () {
-  echo "git version (show|bump (major|minor|rev)|generate)"
+  echo "git vers (show|bump (major|minor|rev)|generate [-i])"
+  echo "  git vers"
+  echo "  git vers show         display version number"
+  echo "  git vers bump major   increment major number and reset minor and rev numbers"
+  echo "  git vers bump minor   increment minor number and reset rev number"
+  echo "  git vers bump rev     increment rev number"
+  echo "  git vers set A B C    set the version to a.b.c"
   exit 1
 }
 
@@ -34,10 +40,22 @@ git_path () {
     echo ""
     return 1
   fi
+}
+
+write_vfile () {
   echo "major=$1" > "$version_file"
   echo "minor=$2" >> "$version_file"
   echo "rev=$3" >> "$version_file"
 }
+
+show_vers () {
+    fmt="%d.%d.%d"
+    if [[ -t 1 ]]; then
+      fmt="$fmt\n"
+    fi
+    printf "$fmt" "$major" "$minor" "$rev"
+}
+
 while getopts ":h" opt; do
   case "$opt" in
     *) usage;;
@@ -50,48 +68,55 @@ require_cwd_in_work_tree
 
 cd "$(git_path)"
 
-if [[ -z $1 ]]; then
-  usage
-elif [[ $1 == generate ]]; then
-  write_vfile 0 0 0
-  echo "$version_file" >> .gitignore
-else 
-  if ! [[ -f "$version_file" ]]; then
-    warn "Version file $version_file missing!"
+if [[ $1 == generate ]] || [[ $1 == init ]]; then
+  if [[ -e $version_file ]]; then
+    echo "$version_file already exists!"
     exit 1
   fi
-  source "$version_file"
-  if [[ $1 == show ]]; then
-    fmt="%d.%d.%d"
-    if [[ -t 1 ]]; then
-      fmt="$fmt\n"
-    fi
-    printf "$fmt" "$major" "$minor" "$rev"
-  elif [[ $1 == bump ]]; then
-    printf "%s.%s.%s -> " "$major" "$minor" "$rev"
-    case $2 in
-      major)
-        (( major++ ))
-        minor=0
-        rev=0
-        ;;
-
-      minor)
-        (( minor++ ))
-        rev=0
-        ;;
-
-      rev)
-        (( rev++ ))
-        ;;
-
-      *)
-        usage
-        ;;
-    esac
-    write_vfile "$major" "$minor" "$rev"
-    printf "%s.%s.%s\n" "$major" "$minor" "$rev"
-  else
-    usage
+  write_vfile 0 0 0
+  shift
+  if [[ $1 == "-i" ]]; then
+    echo "$version_file" >> .gitignore
+    echo "Version file added to .gitignore"
   fi
+  exit
+fi
+
+if ! [[ -f "$version_file" ]]; then
+  warn "Version file $version_file missing!"
+  exit 1
+fi
+source "$version_file"
+
+if [[ -z $1 ]] || [[ $1 == "show" ]]; then
+  show_vers
+elif [[ $1 == bump ]]; then
+  printf "%s.%s.%s -> " "$major" "$minor" "$rev"
+  case $2 in
+    major)
+      (( major++ ))
+      minor=0
+      rev=0
+      ;;
+
+    minor)
+      (( minor++ ))
+      rev=0
+      ;;
+
+    rev)
+      (( rev++ ))
+      ;;
+
+    *)
+      usage
+      ;;
+  esac
+  write_vfile "$major" "$minor" "$rev"
+  printf "%s.%s.%s\n" "$major" "$minor" "$rev"
+elif [[ $1 == "set" ]] && [[ -n $2 ]] && [[ -n $3 ]] && [[ -n $4 ]]; then
+  write_vfile "$2" "$3" "$4"
+  printf "%s.%s.%s\n" "$2" "$3" "$4"
+else
+  usage
 fi
